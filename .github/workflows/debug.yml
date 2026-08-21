@@ -25,14 +25,14 @@ jobs:
           name: wheel
           path: dist
 
-  # A: full suite with OLD hypothesis (what master CI effectively used).
-  old-hypothesis:
+  # Candidate pin: last pure-python hypothesis release.
+  pure-hypothesis:
     needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        iteration: [1, 2, 3, 4]
+        iteration: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,12 +45,13 @@ jobs:
       - name: Install and test
         run: |
           python -m pip install cramjam --pre --no-index --find-links dist --force-reinstall
-          python -m pip install 'hypothesis==6.60.0' 'pytest==9.1.1' 'pytest-benchmark==5.2.3' 'pytest-xdist==3.8.0' numpy
+          python -m pip install 'hypothesis==6.155.7' 'pytest==9.1.1' 'pytest-benchmark==5.2.3' 'pytest-xdist==3.8.0' numpy
+          python -c "import hypothesis; print(hypothesis.__version__, hypothesis.__file__)"
           python -m pytest -vs --benchmark-skip -n0 --dist no
 
-  # B: full suite with NEW hypothesis under the debug allocator to catch
-  # heap corruption at its source.
-  malloc-debug:
+  # Sanity: first compiled release also corrupts? (narrow blame to the
+  # compiled engine rather than 6.156..6.165 logic changes)
+  first-compiled:
     needs: build
     runs-on: ubuntu-latest
     strategy:
@@ -67,10 +68,7 @@ jobs:
           name: wheel
           path: dist
       - name: Install and test
-        env:
-          PYTHONMALLOC: debug
-          PYTHONFAULTHANDLER: '1'
         run: |
           python -m pip install cramjam --pre --no-index --find-links dist --force-reinstall
-          python -m pip install 'hypothesis==6.165.10' 'pytest==9.1.1' 'pytest-benchmark==5.2.3' 'pytest-xdist==3.8.0' numpy
+          python -m pip install 'hypothesis==6.156.1' 'pytest==9.1.1' 'pytest-benchmark==5.2.3' 'pytest-xdist==3.8.0' numpy
           python -m pytest -vs --benchmark-skip -n0 --dist no
