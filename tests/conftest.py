@@ -1,14 +1,19 @@
+import contextlib
 import platform
-import sys
 import sysconfig
 
 import pytest
 
-# DEBUG ONLY: block the hypothesis patch-suggestion module so its import in
-# _hypothesis_pytestplugin.pytest_runtest_makereport raises ImportError (which
-# the plugin handles) instead of the SyntaxError-INTERNALERROR seen in CI,
-# letting pytest print the real FAILURES section.
-sys.modules["hypothesis.extra._patching"] = None
+# Eagerly import hypothesis modules that are otherwise imported lazily in the
+# middle of the test session. pytest assertion-rewrites hypothesis (it ships a
+# pytest plugin), and on GitHub Actions runners the mid-run ast.parse of these
+# lazy imports intermittently fails with a bogus SyntaxError, failing whichever
+# test triggered the import and crashing pytest with INTERNALERROR while
+# reporting. Importing them here means they are parsed once, up front.
+import hypothesis.internal.conjecture.optimiser  # noqa: F401
+
+with contextlib.suppress(ImportError):  # requires the optional libcst
+    import hypothesis.extra._patching  # noqa: F401
 
 
 @pytest.fixture(scope="session")

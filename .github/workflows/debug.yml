@@ -5,44 +5,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  # A: hypothesis-only property tests with target() to force lazy optimiser
-  # import mid-run under pytest assertion rewriting. No cramjam, no numpy.
-  no-cramjam:
+  # Control: full suite, rewriting on, NO conftest fix (checkout of PR branch
+  # conftest is overwritten below). Expect ~50% failure rate.
+  control:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        iteration: [1, 2, 3]
-    steps:
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Install
-        run: python -m pip install 'hypothesis==6.165.10' 'pytest==9.1.1'
-      - name: Run
-        run: |
-          mkdir -p /tmp/t && cat > /tmp/t/test_target.py <<'EOF'
-          from hypothesis import given, target, strategies as st
-
-          @given(x=st.binary(), y=st.integers())
-          def test_targeted(x, y):
-              target(float(len(x)))
-              assert len(x) >= 0
-          EOF
-          cd /tmp/t && python -m pytest -vs test_target.py
-
-  # B: same as A but with numpy + cramjam wheel imported and exercised first.
-  with-cramjam:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        iteration: [1, 2, 3]
+        iteration: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Revert conftest fix
+        run: |
+          python - <<'EOF'
+          import re
+          p = "tests/conftest.py"
+          src = open(p).read()
+          # strip everything between the injected comment block and the pytest import
+          src = src.split("import pytest", 1)
+          open(p, "w").write("import platform\nimport sysconfig\n\nimport pytest" + src[1])
+          print(open(p).read()[:200])
+          EOF
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Build wheel
@@ -51,41 +37,20 @@ jobs:
           target: x86_64
           manylinux: auto
           args: -i 3.13 --release --out dist
-      - name: Install
+      - name: Install and test
         run: |
           python -m pip install cramjam --pre --no-index --find-links dist --force-reinstall
-          python -m pip install 'hypothesis==6.165.10' 'pytest==9.1.1' numpy
-      - name: Run
-        run: |
-          mkdir -p /tmp/t && cat > /tmp/t/test_target.py <<'EOF'
-          import cramjam
-          import numpy as np
-          from hypothesis import given, target, strategies as st
+          python -m pip install cramjam[dev] --pre --find-links dist
+          python -m pytest -vs --benchmark-skip -n0 --dist no
 
-          @given(raw=st.binary())
-          def test_roundtrip(raw):
-              out = np.zeros(len(raw), dtype=np.uint8)
-              n = cramjam.brotli.decompress_into(
-                  cramjam.brotli.compress(raw), out
-              )
-              assert n == len(raw)
-
-          @given(x=st.binary(), y=st.integers())
-          def test_targeted(x, y):
-              target(float(len(x)))
-              assert len(x) >= 0
-          EOF
-          cd /tmp/t && python -m pytest -vs test_target.py
-
-  # C: full cramjam suite but with pytest assertion rewriting disabled
-  # (--assert=plain). If A/B fail and this passes, the rewrite-on-lazy-import
-  # path is the trigger.
-  assert-plain:
+  # Candidate fix: full suite, rewriting on, conftest eagerly imports the
+  # lazily-loaded hypothesis modules. Expect green.
+  eager-import-fix:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        iteration: [1, 2]
+        iteration: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -103,4 +68,4 @@ jobs:
         run: |
           python -m pip install cramjam --pre --no-index --find-links dist --force-reinstall
           python -m pip install cramjam[dev] --pre --find-links dist
-          python -m pytest -vs --benchmark-skip -n0 --dist no --assert=plain
+          python -m pytest -vs --benchmark-skip -n0 --dist no
