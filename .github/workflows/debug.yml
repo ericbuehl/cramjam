@@ -1,0 +1,53 @@
+name: debug-hypothesis
+on:
+  push:
+    branches: [debug-hypothesis-internalerror]
+  workflow_dispatch:
+
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install
+        run: |
+          python -VV
+          python -m pip install 'hypothesis==6.165.10' 'pytest==9.1.1'
+      - name: Direct ast.parse of _patching.py
+        run: |
+          python - <<'EOF'
+          import ast, hypothesis, pathlib, sys
+          p = pathlib.Path(hypothesis.__file__).parent / "extra" / "_patching.py"
+          src = p.read_bytes()
+          print("file size:", len(src))
+          import hashlib; print("sha256:", hashlib.sha256(src).hexdigest())
+          try:
+              ast.parse(src, filename=str(p))
+              print("ast.parse OK")
+          except SyntaxError as e:
+              print("SYNTAXERROR:", e)
+          EOF
+      - name: Failing hypothesis test under pytest
+        run: |
+          mkdir -p /tmp/t && cat > /tmp/t/test_fail.py <<'EOF'
+          from hypothesis import given, strategies as st
+
+          @given(x=st.integers())
+          def test_always_fails(x):
+              assert x < 0 or x > 0
+          EOF
+          cd /tmp/t && python -m pytest -q test_fail.py || true
+      - name: Float sanity in hostedtoolcache build
+        if: always()
+        run: |
+          python - <<'EOF'
+          import ast
+          for s in ["x = 1e4", "x = 0.5", "x = 1_000.25", "y = 3j", "z = 0x10"]:
+              try:
+                  ast.parse(s)
+                  print("OK  :", s)
+              except SyntaxError as e:
+                  print("FAIL:", s, "->", e)
+          EOF
